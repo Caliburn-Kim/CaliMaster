@@ -25,27 +25,23 @@ from sklearn.tree import DecisionTreeClassifier
 from sklearn.tree import ExtraTreeClassifier
 
 import cklib
-import cklib.ckconst as ckc
+from cklib import ckconst
 from cklib import cksess
 from cklib.ckstd import fprint
 from cklib.cktime import date
 from cklib import ckstd
 
 class Flow_Dataset:
-    def __init__(self, split = 0.7, logging = True, random_state = None):
+    def __init__(self, logging = True, random_state = None):
+        self.seed = random_state
+        use_cores = multiprocessing.cpu_count() // 3 * 2
+        
         self.train_dataset = None
         self.test_dataset = None
         self.train_session = None
         self.test_session = None
-        
         self.train_flows = None
         self.test_flows = None
-        
-        self.split_ratio = split
-        self.seed = random_state
-        self.skip_datas = []
-        
-        use_cores = multiprocessing.cpu_count() // 3 * 2
         
         self.pclf = RandomForestClassifier(n_jobs = use_cores, random_state = random_state)
         self.sclf = RandomForestClassifier(n_jobs = use_cores, random_state = random_state)
@@ -70,50 +66,47 @@ class Flow_Dataset:
         self.pkt_train_ptime_mean = None
         self.pkt_test_ptime_mean = None
         
+        self.train_durations = None
+        self.test_durations = None
+        self.train_fin_counts = None
+        self.test_fin_counts = None
+        self.train_protocols = None
+        self.test_protocols = None
+        
         if logging:
             self.log = open('/tf/md0/thkim/log/' + date() + '.log', 'a')
         else:
             self.log = None
         
-    def read_csv(self, path, encoding = ckc.ISCX_DATASET_ENCODING):
-        fprint(self.log, 'Reading dataset: {}'.format(path))
+    def read_csv(self, ptrain_path, ptest_path, strain_path, stest_path, encoding = ckconst.ISCX_DATASET_ENCODING):
+        fprint(self.log, 'Reading dataset')
         ts = timeit.default_timer()
-        dataset = pd.read_csv(filepath_or_buffer = path, encoding = encoding).values
         
-        fprint(self.log, 'Skip data: {}'.format(self.skip_datas))
-        for word in self.skip_datas:
-            dataset = dataset[dataset[:, -1] != word]
-            
-        flows = cksess.get_flows(dataset = dataset)
-        train_size = int(len(flows) * self.split_ratio)
-        te = timeit.default_timer()
-        fprint(self.log, '---> Done ({:.4f} seconds)\n'.format(te - ts))
+        self.train_dataset = pd.read_csv(filepath_or_buffer = ptrain_path, encoding = encoding).values
+        self.test_dataset = pd.read_csv(filepath_or_buffer = ptest_path, encoding = encoding).values
+        self.train_session = pd.read_csv(filepath_or_buffer = strain_path, encoding = encoding).values
+        self.test_session = pd.read_csv(filepath_or_buffer = stest_path, encoding = encoding).values
         
-        fprint(self.log, 'Shuffling dataset by flows')
-        ts = timeit.default_timer()
-        dataset, _ = cksess.shuffle_flow(dataset = dataset, flows = flows, random_state = self.seed)
-        flows = cksess.get_flows(dataset = dataset)
-        te = timeit.default_timer()
-        fprint(self.log, '---> Done ({:.4f} seconds)\n'.format(te - ts))
-        
-        fprint(self.log, 'Creating training & test dataset')
-        ts = timeit.default_timer()
-        session = dataset[[flow[-1] for flow in flows]]
-        self.train_session = session[:train_size]
-        self.test_session = session[train_size:]
-        self.train_dataset = dataset[cksess.flatten(flows[:train_size])]
-        self.test_dataset = dataset[cksess.flatten(flows[train_size:])]
         self.train_flows = cksess.get_flows(dataset = self.train_dataset)
         self.test_flows = cksess.get_flows(dataset = self.test_dataset)
+        
+        self.train_durations = self.train_dataset[:, 3]
+        self.train_durations = [self.train_durations[flow] for flow in self.train_flows]
+        self.test_durations = self.test_dataset[:, 3]
+        self.test_durations = [self.test_durations[flow] for flow in self.test_flows]
+        self.train_fin_counts = self.train_dataset[:, 45]
+        self.train_fin_counts = [self.train_fin_counts[flow[-1]] for flow in self.train_flows]
+        self.test_fin_counts = self.test_dataset[:, 45]
+        self.test_fin_counts = [self.test_fin_counts[flow[-1]] for flow in self.test_flows]
+        self.train_protocols = self.train_dataset[:, 2]
+        self.train_protocols = [self.train_protocols[flow[-1]] for flow in self.train_flows]
+        self.test_protocols = self.test_dataset[:, 2]
+        self.test_protocols = [self.test_protocols[flow[-1]] for flow in self.test_flows]
+        
         te = timeit.default_timer()
         fprint(self.log, '---> Done ({:.4f} seconds)\n'.format(te - ts))
         
         return '<Function: read & shuffling csv>'
-        
-    def skip_data(self, *skip):
-        for word in skip:
-            self.skip_datas.append(word)
-        return '<Function: skip data>'
     
     def modelling(self):
         fprint(self.log, 'Training label encoder and scaler')
@@ -136,8 +129,6 @@ class Flow_Dataset:
             X = self.sscaler.transform(self.train_session[:, 1:-1]),
             y = self.le.transform(self.train_session[:, -1])
         )
-        
-        gc.collect()
         te = timeit.default_timer()
         fprint(self.log, '---> Done ({:.4f} seconds)'.format(te - ts))
         
@@ -207,6 +198,14 @@ class Flow_Dataset:
         return self.train_flows
     def getTrainLabel(self):
         return self.train_session[:, -1]
+    def getTrainMean(self):
+        return self.pkt_train_ptime_mean
+    def getTrainDuration(self):
+        return self.train_durations
+    def getTrainFin(self):
+        return self.train_fin_counts
+    def getTrainProtocol(self):
+        return self.train_protocols
     
     def getTestPred(self):
         return self.ppreds_test, self.spreds_test
@@ -218,6 +217,14 @@ class Flow_Dataset:
         return self.test_flows
     def getTestLabel(self):
         return self.test_session[:, -1]
+    def getTestMean(self):
+        return self.pkt_test_ptime_mean
+    def getTestDuration(self):
+        return self.test_durations
+    def getTestFin(self):
+        return self.test_fin_counts
+    def getTestProtocol(self):
+        return self.test_protocols
     
 class Session_Dataset:
     def __init__(self, split = 0.7, clf = 'rf', logging = True, random_state = None):
@@ -259,7 +266,7 @@ class Session_Dataset:
             self.skip_datas.append(word)
         return '<Function: skip data>'
 
-    def read_csv(self, path, encoding = ckc.ISCX_DATASET_ENCODING):
+    def read_csv(self, path, encoding = ckconst.ISCX_DATASET_ENCODING):
         fprint(self.log, 'Reading dataset: {}'.format(path))
         ts = timeit.default_timer()
         dataset = pd.read_csv(filepath_or_buffer = path, encoding = encoding).values
@@ -358,7 +365,7 @@ class SessionConverter:
         else:
             self.log = None
         
-    def read_csv(self, path, encoding = ckc.ISCX_DATASET_ENCODING):
+    def read_csv(self, path, encoding = ckconst.ISCX_DATASET_ENCODING):
         fprint(self.log, 'Read dataset: {}'.format(path))
         ts = timeit.default_timer()
         self.dataset = pd.read_csv(filepath_or_buffer = path, encoding = encoding)
@@ -387,7 +394,7 @@ class SessionConverter:
         if self.isSess:
             fprint(self.log, 'Writing session dataset at {}'.format(path))
             ts = timeit.default_timer()
-            pd.DataFrame(data = self.session).to_csv(path, index = False, header = self.header, encoding = ckc.ISCX_DATASET_ENCODING)
+            pd.DataFrame(data = self.session).to_csv(path, index = False, header = self.header, encoding = ckconst.ISCX_DATASET_ENCODING)
             te = timeit.default_timer()
             fprint(self.log, '---> Done ({:.4f} seconds)'.format(te - ts))
         else:
