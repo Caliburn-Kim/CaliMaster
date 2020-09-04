@@ -22,12 +22,96 @@ from sklearn.metrics import recall_score
 from sklearn.metrics import classification_report
 from sklearn.metrics import confusion_matrix
 
-import cklib.ckconst as ckc
+from cklib import ckconst
 from cklib.ckstd import fprint
-from cklib.cktime import time_stamp
+from cklib.cktime import date
 from cklib import ckstd
 
 import matplotlib.pyplot as plt
+
+class PacketMachine:
+    def __init__(self, random_state = None, logging = True):
+        self.ppreds = None
+        self.pprobs = None
+        self.spreds = None
+        self.flows = None
+        self.classes = None
+        self.y_true = None
+        self.duration = None
+        self.protocol = None
+        self.fin_count = None
+        self.ptime_mean = None
+        self.stime_mean = None
+        self.isInit = False
+
+        np.random.seed(random_state)
+        
+        if logging:
+            self.log = open('/tf/md0/thkim/log/' + date() + '.log', 'a')
+        else:
+            self.log = None
+
+    def initalizing(self, ppreds, pprobs, spreds, flows, classes, y_true, duration, protocol, fin_count, ptime_mean, stime_mean):
+        self.ppreds = ppreds
+        self.pprobs = pprobs
+        self.spreds = spreds
+        self.flows = flows
+        self.classes = classes
+        self.y_true = y_true
+        self.duration = duration
+        self.protocol = protocol
+        self.fin_count = fin_count
+        self.ptime_mean = ptime_mean
+        self.stime_mean = stime_mean
+        self.isInit = True
+
+        return '<Function: Initailizing class member values>'
+
+    def classifying(self, h_threshold, l_threshold = None):
+        classified = []
+        class_detect_times = [[] for _ in self.classes]
+        class_detect_process_times = [[] for _ in self.classes]
+        for flow_idx, fpreds, fprobs in zip(range(len(self.flows)), self.ppreds, self.pprobs):
+            found = False
+            detect_time = 0
+            detect_process_time = 0
+            pkt_count = 0
+
+            for pkt_idx, pred, prob in zip(range(len(fpreds)), fpreds, fprobs):
+                detect_time = self.duration[flow_idx][pkt_idx]
+                detect_process_time += self.ptime_mean
+                pkt_count += 1
+
+                if (h_threshold <= prob):
+                    classified.append(pred)
+                    found = True
+                    break
+
+            if not found:
+                classified.append(self.spreds[flow_idx])
+                detect_time = self.duration[flow_idx][-1]
+                detect_process_time += self.stime_mean
+
+                if self.protocol[flow_idx] == ckconst.TCP:
+                    if self.fin_count[flow_idx] < 1:
+                        detect_time += ckconst.FLOW_TIMEOUT
+                else:
+                    detect_time == ckconst.FLOW_TIMEOUT
+
+            class_detect_times[classified[-1]].append(detect_time)
+            class_detect_process_times[classified[-1]].append(detect_process_time)
+        
+        report = classification_report(
+            y_true = self.y_true,
+            y_pred = classified,
+            target_names = self.classes,
+            output_dict = True
+        )
+
+        report['detect time'] = detect_time
+        report['detect process'] = detect_process_time
+        return report
+        
 
 class HThreshold:
     def __init__(self, random_state = None, verbose = True):

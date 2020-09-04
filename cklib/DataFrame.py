@@ -63,8 +63,10 @@ class Flow_Dataset:
         self.pprobs_test = None
         self.pprobs_test_all = None
 
-        self.pkt_train_ptime_mean = None
-        self.pkt_test_ptime_mean = None
+        self.train_ptime_mean = None
+        self.train_stime_mean = None
+        self.test_ptime_mean = None
+        self.test_stime_mean = None
         
         self.train_durations = None
         self.test_durations = None
@@ -74,7 +76,7 @@ class Flow_Dataset:
         self.test_protocols = None
         
         if logging:
-            self.log = open('/tf/md0/thkim/log/' + date() + '.log', 'a')
+            self.log = open('./log/' + date() + '.log', 'a')
         else:
             self.log = None
         
@@ -143,21 +145,25 @@ class Flow_Dataset:
         te = timeit.default_timer()
         fprint(self.log, 'Session training dataset predict time: {} seconds'.format(te - ts))
 
+        self.train_stime_mean = (te - ts) / len(self.spreds_train)
+
         fprint(self.log, 'Predict session test dataset')
         ts = timeit.default_timer()
         self.spreds_test = self.sclf.predict(self.sscaler.transform(self.train_session[:, 1:-1]))
         te = timeit.default_timer()
         fprint(self.log, 'Session test dataset predict time: {} seconds'.format(te - ts))
+        self.test_stime_mean = (te - ts) / len(self.spreds_test)
+
         self.sprobs_train_all = self.sclf.predict_proba(self.sscaler.transform(self.train_session[:, 1:-1]))
         self.sprobs_train = np.max(self.sprobs_train_all, axis = 1)
         self.sprobs_test_all = self.sclf.predict_proba(self.sscaler.transform(self.test_session[:, 1:-1]))
         self.sprobs_test = np.max(self.sprobs_test_all, axis = 1)
-
+        
         fprint(self.log, 'Predict packet training dataset')
         ts = timeit.default_timer()
         self.ppreds_train = self.pclf.predict(self.pscaler.transform(self.train_dataset[:, 2:-1]))
         te = timeit.default_timer()
-        self.pkt_train_ptime_mean = (te - ts) / len(self.ppreds_train)
+        self.train_ptime_mean = (te - ts) / len(self.ppreds_train)
         self.ppreds_train = [self.ppreds_train[flow] for flow in self.train_flows]
         self.pprobs_train_all = self.pclf.predict_proba(self.pscaler.transform(self.train_dataset[:, 2:-1]))
         self.pprobs_train = np.max(self.pprobs_train_all, axis = 1)
@@ -169,8 +175,7 @@ class Flow_Dataset:
         ts = timeit.default_timer()
         self.ppreds_test = self.pclf.predict(self.pscaler.transform(self.test_dataset[:, 2:-1]))
         te = timeit.default_timer()
-        packet_test_pred_time = te - ts
-        self.pkt_test_ptime_mean = packet_test_pred_time / len(self.ppreds_test)
+        self.test_ptime_mean = (te - ts) / len(self.ppreds_test)
         self.ppreds_test = [self.ppreds_test[flow] for flow in self.test_flows]
         self.pprobs_test_all = self.pclf.predict_proba(self.pscaler.transform(self.test_dataset[:, 2:-1]))
         self.pprobs_test = np.max(self.pprobs_test_all, axis = 1)
@@ -199,7 +204,7 @@ class Flow_Dataset:
     def getTrainLabel(self):
         return self.train_session[:, -1]
     def getTrainMean(self):
-        return self.pkt_train_ptime_mean
+        return self.train_ptime_mean, self.train_stime_mean
     def getTrainDuration(self):
         return self.train_durations
     def getTrainFin(self):
@@ -218,7 +223,7 @@ class Flow_Dataset:
     def getTestLabel(self):
         return self.test_session[:, -1]
     def getTestMean(self):
-        return self.pkt_test_ptime_mean
+        return self.test_ptime_mean, self.test_stime_mean
     def getTestDuration(self):
         return self.test_durations
     def getTestFin(self):

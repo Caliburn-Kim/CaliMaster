@@ -2,7 +2,6 @@ from __future__ import print_function
 
 from cklib import ckstd
 from cklib.ckstd import fprint
-from cklib import ckmachine
 import timeit
 import numpy as np
 from sklearn.metrics import f1_score
@@ -33,16 +32,12 @@ class StaticThreshold:
         self.flows = flows
         self.classes = classes
         self.y_true = y_true
-        self.duration = duration
-        self.protocol = protocol
-        self.fin_count = fin_count
-        self.ptime_mean = mean
         self.th_range[0] = start
         self.th_range[1] = end
         
         assert self.th_range[1] > self.th_range[0], 'ERROR: Threshold range is not collect'
         
-        self.threshold = [round((a / 1000) + self.th_range[0], 3) for a in range(int((self.th_range[1] - self.th_range[0]) * 1000))]
+        self.threshold = [round((a / 1000) + self.th_range[0], 3) for a in range(int((self.th_range[1] - self.th_range[0]) * 1000) + 2)]
         self.isInit = True
         fprint(self.log, 'Initializing compilte')
         
@@ -55,15 +50,15 @@ class StaticThreshold:
         self.f1s = []
         for th in self.threshold:
             classified = []
-            for flow_idx, fpreds, fprobs in zip(range(len(self.flows)), self.ppreds, self.spreds):
+            for flow_idx, fpreds, fprobs in zip(range(len(self.flows)), self.ppreds, self.pprobs):
                 found = False
-                for pkt_idx, pred, prob in zip(range(len(fpreds)), fpreds, fprobs):
+                for pred, prob in zip(fpreds, fprobs):
                     if th <= prob:
                         classified.append(pred)
                         found = True
                         break
                 if not found:
-                    classified.append(spreds[flow_idx])
+                    classified.append(self.spreds[flow_idx])
             
             self.f1s.append(
                 f1_score(
@@ -79,10 +74,10 @@ class StaticThreshold:
             
         return '<Function calculating f1-scores>'
     
-    def getThreshold(self, omega = 1.0):
-        assert self.f1s != None, 'ERROR: No f1-score data'
-        idx = np.arange(len(self.f1s)[self.f1s >= omega][0])
+    def getThreshold(self, omega = 0):
+        f1_delta = np.max(self.f1s) * (1. - omega)
+        idx = np.arange(len(self.f1s))[self.f1s >= f1_delta]
         f1 = self.f1s[idx]
-        th = self.threshold[idx]
+        th = np.array(self.threshold)[idx]
         fprint(self.log, 'Omega: {} --> [F1-Score: {}] [Threshold: {}]'.format(omega, f1, th))
         return th
